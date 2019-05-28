@@ -9,7 +9,7 @@ from random import sample
 import math
 
 env = gym.make('CartPole-v0')
-batch_size = 20
+batch_size = 32
 gamma = 0.95
 eps_start = 1.0
 eps_end = 0.01
@@ -39,7 +39,6 @@ class Deep_Q_Network(nn.Module):
         x = self.linear1(x)
         x = F.relu(x)
         output = self.linear2(x)
-        output = torch.sigmoid(output)
         return output
 
 
@@ -49,27 +48,19 @@ def update_network():
     
     sample = replay_memory.random_sample()
 
-    states, actions, rewards, next_states, terminal = zip(*sample)
+    for state, action, reward, next_state, terminal in sample:
 
-    states = torch.cat(states)
-    actions = torch.cat(actions)
-    rewards = torch.cat(rewards)
-    next_states = torch.cat(next_states)
-    
-    expected_q = rewards
+        current_q = policy_net(state).gather(1, action.unsqueeze(1))
+        expected_q = reward
+        max_next_q = target_net(next_state).detach().max(1)[0]
 
-    current_q = policy_net(states).gather(1, actions.unsqueeze(1))
-    max_next_q = target_net(next_states).detach().max(1)[0]
-    
-    if not terminal:
-        expected_q = rewards + (gamma * max_next_q)
+        if not terminal:
+            expected_q = reward + (gamma * max_next_q)
 
-    loss = F.mse_loss(current_q.squeeze(), expected_q)
-    optimizer.zero_grad()
-    loss.backward()
-    for param in policy_net.parameters():
-        param.grad.data.clamp_(-1, 1)
-    optimizer.step()
+        loss = F.smooth_l1_loss(current_q.squeeze(), expected_q)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
 def choose_action(state):
     global steps_done
@@ -84,8 +75,7 @@ def choose_action(state):
         return action
     else:
         output_scores = policy_net(state)
-        m = Categorical(output_scores)
-        action = m.sample()
+        action = output_scores.argmax()
         return action.item()
         
 
